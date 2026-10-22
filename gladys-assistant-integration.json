@@ -1,177 +1,87 @@
 {
   "manifest_version": 1,
   "type": "device",
-  "name": "Demo Devices Template",
+  "name": "madVR Envy",
   "description": {
-    "en": "Starter template showing sensors, a switch, a dimmable light and a smart plug.",
-    "fr": "Template de démarrage : capteurs, interrupteur, lampe variable et prise connectée."
+    "en": "madVR Envy video processors on the local network: signal, HDR, profiles, standby.",
+    "fr": "Processeurs vidéo madVR Envy en local : signal, HDR, profils, veille."
   },
-  "version": "1.0.0",
-  "docker_image": "ghcr.io/gladysassistant/integration-template-js:1.0.0",
+  "version": "0.1.0",
+  "docker_image": "ghcr.io/lm1lc3n7/gladys-madvr:0.1.0",
   "gladys_version": ">=5.1.0",
-  "cover_image": "https://raw.githubusercontent.com/GladysAssistant/integration-template-js/master/cover.png",
-  "categories": ["lighting", "security", "environment"],
-  "transports": ["local", "cloud"],
+  "cover_image": "https://raw.githubusercontent.com/LM1LC3N7/gladys-madvr/main/cover.png",
+  "categories": ["multimedia"],
+  "transports": ["local"],
+  "network_wake": true,
   "config_schema": [
     {
       "key": "intro",
       "type": "section",
-      "label": { "en": "Getting started", "fr": "Pour commencer" },
+      "label": {
+        "en": "Your madVR Envy, on your local network",
+        "fr": "Vos madVR Envy, sur votre réseau local"
+      },
       "description": {
-        "en": "The demo weather station reads real data from the free Open-Meteo API: pick the coordinates to observe. No account, no API key.",
-        "fr": "La station météo de démonstration lit de vraies données via l'API gratuite Open-Meteo : choisissez les coordonnées à observer. Pas de compte, pas de clé d'API."
+        "en": "Power state, input and output signal (resolution, frame rate, HDR), detected aspect ratio, internal temperatures, Power on (Wake-on-LAN), Standby, Power off, profiles, tone mapping and remote keys of each madVR Envy, through the IP control protocol published by madVR Labs (TCP port 44077), without any cloud. Give each Envy a fixed IP address in your router and type it below while it is on; the Envy units then appear in the Discovery tab. Power on, Standby and Power off are buttons, never a switch: an \"everything off\" never reaches an Envy. Never tested with a real Envy. Unofficial integration, not affiliated with madVR Labs.",
+        "fr": "État de marche, signal d'entrée et de sortie (résolution, fréquence, HDR), format d'image détecté, températures internes, allumage (Wake-on-LAN), veille, extinction, profils, tone mapping et touches de télécommande de chaque madVR Envy, par le protocole de contrôle IP publié par madVR Labs (port TCP 44077), sans aucun cloud. Donnez à chaque Envy une adresse IP fixe dans votre box et saisissez-la ci-dessous pendant qu'il est allumé ; les Envy apparaissent alors dans l'onglet Découverte. Allumage, veille et extinction sont des boutons, jamais un interrupteur : un « tout éteindre » n'atteint jamais un Envy. Jamais testé avec un vrai Envy. Intégration non officielle, sans lien avec madVR Labs."
       },
       "links": [
         {
-          "url": "https://open-meteo.com/en/docs",
-          "label": { "en": "Open-Meteo documentation", "fr": "Documentation Open-Meteo" }
+          "url": "https://github.com/LM1LC3N7/gladys-madvr/blob/main/docs/fr.md",
+          "label": { "en": "Guide (French)", "fr": "Guide (français)" }
+        },
+        {
+          "url": "https://github.com/LM1LC3N7/gladys-madvr/blob/main/docs/en.md",
+          "label": { "en": "Guide (English)", "fr": "Guide (anglais)" }
         }
       ]
     },
     {
-      "key": "latitude",
-      "type": "number",
-      "label": { "en": "Latitude", "fr": "Latitude" },
+      "key": "addresses",
+      "type": "string",
+      "label": { "en": "IP addresses of the Envy units", "fr": "Adresses IP des Envy" },
       "description": {
-        "en": "Latitude used for the demo weather sensor.",
-        "fr": "Latitude utilisée par le capteur météo de démonstration."
+        "en": "Separated by commas, for example 192.168.1.60. Port 44077 by default (another one: 192.168.1.60:44078).",
+        "fr": "Séparées par des virgules, par exemple 192.168.1.60. Port 44077 par défaut (un autre : 192.168.1.60:44078)."
       },
-      "placeholder": { "en": "e.g. 48.8566", "fr": "ex. 48.8566" },
-      "required": true,
-      "default": 48.8566,
-      "min": -90,
-      "max": 90
-    },
-    {
-      "key": "longitude",
-      "type": "number",
-      "label": { "en": "Longitude", "fr": "Longitude" },
-      "description": {
-        "en": "Longitude used for the demo weather sensor.",
-        "fr": "Longitude utilisée par le capteur météo de démonstration."
-      },
-      "placeholder": { "en": "e.g. 2.3522", "fr": "ex. 2.3522" },
-      "required": true,
-      "default": 2.3522,
-      "min": -180,
-      "max": 180
-    },
-    {
-      "key": "unit",
-      "type": "select",
-      "label": { "en": "Temperature unit", "fr": "Unité de température" },
+      "placeholder": { "en": "192.168.1.60", "fr": "192.168.1.60" },
       "required": false,
-      "default": "celsius",
-      "options": [
-        { "value": "celsius", "label": { "en": "Celsius", "fr": "Celsius" } },
-        { "value": "fahrenheit", "label": { "en": "Fahrenheit", "fr": "Fahrenheit" } }
-      ]
+      "default": ""
     },
     {
-      "key": "poll_frequency",
+      "key": "poll_interval",
       "type": "number",
       "label": { "en": "Refresh interval (s)", "fr": "Intervalle de rafraîchissement (s)" },
       "description": {
-        "en": "How often sensors are polled, in seconds (one minute minimum).",
-        "fr": "Fréquence d'interrogation des capteurs, en secondes (une minute minimum)."
+        "en": "How often each Envy is read, in seconds (10 to 300). Never more often, not even after a restart or with the check button.",
+        "fr": "Fréquence de lecture de chaque Envy, en secondes (10 à 300). Jamais plus souvent, même après un redémarrage ou avec le bouton de vérification."
       },
       "required": false,
-      "default": 300,
-      "min": 60,
-      "max": 3600
+      "default": 30,
+      "min": 10,
+      "max": 300
+    },
+    {
+      "key": "wake_broadcast",
+      "type": "string",
+      "label": {
+        "en": "Wake-on-LAN broadcast address (optional)",
+        "fr": "Adresse de diffusion du Wake-on-LAN (facultatif)"
+      },
+      "description": {
+        "en": "Only if Power on does not wake the Envy: the broadcast address of your network, for example 192.168.1.255. Empty: 255.255.255.255. Gladys sends the packet itself.",
+        "fr": "Seulement si l'allumage ne réveille pas l'Envy : l'adresse de diffusion de votre réseau, par exemple 192.168.1.255. Vide : 255.255.255.255. Gladys envoie le paquet elle-même."
+      },
+      "placeholder": { "en": "192.168.1.255", "fr": "192.168.1.255" },
+      "required": false,
+      "default": ""
     }
   ],
   "actions": [
     {
-      "key": "test_weather",
-      "label": { "en": "Test the weather provider", "fr": "Tester le fournisseur météo" },
+      "key": "check_devices",
+      "label": { "en": "Check the Envy units", "fr": "Vérifier les Envy" },
       "timeout_seconds": 30
-    },
-    {
-      "key": "identify",
-      "label": { "en": "Identify a device", "fr": "Identifier un appareil" },
-      "fields": [
-        {
-          "key": "device",
-          "type": "select",
-          "source": "devices",
-          "label": { "en": "Device", "fr": "Appareil" },
-          "required": true
-        }
-      ]
-    }
-  ],
-  "scene_triggers": [
-    {
-      "key": "motion_detected",
-      "label": { "en": "Motion detected", "fr": "Mouvement détecté" },
-      "description": {
-        "en": "A demo motion sensor saw a person or an animal move.",
-        "fr": "Un détecteur de démonstration a vu bouger une personne ou un animal."
-      },
-      "fields": [
-        {
-          "key": "device",
-          "type": "select",
-          "source": "devices",
-          "label": { "en": "Sensor", "fr": "Détecteur" }
-        },
-        {
-          "key": "target",
-          "type": "multi_select",
-          "label": { "en": "What moved", "fr": "Ce qui a bougé" },
-          "options": [
-            { "value": "person", "label": { "en": "Person", "fr": "Personne" } },
-            { "value": "animal", "label": { "en": "Animal", "fr": "Animal" } }
-          ]
-        }
-      ],
-      "variables": [
-        {
-          "key": "target",
-          "type": "string",
-          "label": { "en": "What moved", "fr": "Ce qui a bougé" }
-        }
-      ]
-    }
-  ],
-  "scene_actions": [
-    {
-      "key": "identify_device",
-      "label": { "en": "Identify a device", "fr": "Identifier un appareil" },
-      "description": {
-        "en": "Make a device signal itself (the demo light blinks).",
-        "fr": "Fait se signaler un appareil (la lampe de démonstration clignote)."
-      },
-      "timeout_seconds": 15,
-      "fields": [
-        {
-          "key": "device",
-          "type": "select",
-          "source": "devices",
-          "label": { "en": "Device", "fr": "Appareil" },
-          "required": true
-        }
-      ],
-      "outputs": [
-        {
-          "key": "signalled",
-          "type": "boolean",
-          "label": { "en": "Device signalled", "fr": "Appareil signalé" }
-        }
-      ]
-    }
-  ],
-  "widgets": [
-    {
-      "key": "demo_status",
-      "label": { "en": "Demo status", "fr": "État de la démo" },
-      "description": {
-        "en": "Live temperature and plug power, plug connection and observed location.",
-        "fr": "Température et puissance en direct, connexion de la prise, position observée."
-      },
-      "icon": "activity",
-      "action_timeout_seconds": 15
     }
   ]
 }

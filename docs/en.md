@@ -1,61 +1,106 @@
-# Demo Devices Template
+# madVR Envy for Gladys
 
-This is the user documentation of the integration. Gladys re-hosts this file
-and shows a permanent **Documentation** link to it in the Configuration screen
-(in the user's language, with English as the fallback) — it is when
-configuring that the user needs it most. Keep the short onboarding hints in
-the `section` blocks of the manifest `config_schema`; put the long
-step-by-step (screenshots, troubleshooting…) here.
+Follow and control your **madVR Envy** video processors (Envy Core, Pro,
+Extreme) from Gladys, locally, without any cloud: power state, input and
+output signal (resolution, frame rate, HDR), detected aspect ratio, internal
+temperatures, power on, standby, power off, profiles, tone mapping and remote
+keys.
+
+> **Important.** This integration has never been tested with a real
+> device: it was written from the `py-madvr2` library (the one of Home
+> Assistant) and tested against a fake Envy only. Your feedback is welcome.
+> Unofficial integration, not affiliated with madVR Labs.
+
+## Installation
+
+1. Connect the Envy to your network and give it a **fixed IP address** in your
+   router (reserved DHCP lease).
+2. Turn the Envy on: it listens on the network (TCP port 44077) only when on.
+3. In Gladys, install the **madVR Envy** integration and accept the
+   **Wake-on-LAN** permission (Gladys sends the wake packet on your network
+   itself).
+4. Open its configuration and type the IP addresses, separated by commas (for
+   example `192.168.1.60`; port 44077 by default, another one as
+   `192.168.1.60:44078`).
+5. The Envy appears in the **Discovery** tab: create it.
+
+The first time, the Envy must be on: the integration reads its MAC address,
+which identifies it from then on (and is used for Wake-on-LAN); its IP
+address may change: type the new one.
 
 ## What you get
 
-Six demo devices show up after installation: a weather station (real data
-from Open-Meteo), a switch, a dimmable light, a smart plug with power
-metering, a motion sensor and a camera.
+| Feature                                  | Gladys type               | Note                                                    |
+| ---------------------------------------- | ------------------------- | ------------------------------------------------------- |
+| Power                                    | binary state (read only)  | 1 when the Envy answers, 0 otherwise (off or standby)   |
+| Power status                             | text (read only)          | On, Off or standby                                      |
+| Power on (Wake-on-LAN)                   | button                    | sent only when the Envy does not answer                 |
+| Standby, Power off                       | buttons                   | never blocked, see below                                |
+| Input signal, HDR input                  | binary states (read only) | HDR: HDR10, HLG...                                      |
+| Input resolution, rate, range, color, AR | texts (read only)         | for example 3840x2160, 23.976p, HDR10, 422 10bit, 16:9  |
+| Output resolution, frame rate, range     | texts (read only)         |                                                         |
+| Detected aspect ratio, masking ratio     | texts (read only)         | for example 2.40:1 (Panavision)                         |
+| GPU, HDMI, CPU, mainboard temperatures   | device temperature, °C    | kept out of the room averages                           |
+| Activate a profile                       | dropdown                  | Source, Display or Custom profiles 1 to 9               |
+| Tone mapping on / off                    | buttons                   |                                                         |
+| Remote key                               | dropdown                  | Menu, arrows, OK, Input, Settings, colors (never Power) |
 
-## Configuration
+On purpose, no **switch**: an "everything off" or "everything on" from a voice
+assistant or a scene never turns your Envy on or off. Use the buttons in your
+scenes.
 
-1. Open the **Configuration** tab of the integration.
-2. Set the **latitude** and **longitude** the demo weather station should
-   observe (they default to Paris), and pick your temperature unit.
-   The **refresh interval** sets how often the weather station and the
-   plug's power are read: every 5 minutes by default, every minute at most.
-3. Save: the devices appear in the **Discovery** tab, ready to be added.
+## Commands
 
-The **Prefer the local connection** toggle drives the demo plug: it reports
-the channel it actually uses as a badge (local or cloud), with an orange dot
-when it runs degraded (local refused, cloud fallback).
+- **Standby** and **Power off** are the protective commands: they leave at
+  once, without waiting for a read or another command, in a single try. They
+  cancel a power on in progress or waiting (the repeated Wake-on-LAN
+  included). When the Envy does not answer (already off or in standby),
+  nothing is sent and the command succeeds.
+- **Power on** reads the Envy first: when it answers, nothing is sent;
+  otherwise Gladys sends a Wake-on-LAN packet to its MAC address, then again
+  every 10 seconds for 2 minutes, until it answers.
+- **Profile**, **tone mapping** and **remote key** are sent only when the
+  Envy answers.
 
-## Actions
+Before each command, the integration reads the MAC address of the Envy again:
+when another Envy answers at that IP address, nothing is sent and the address
+is forgotten. An unreadable MAC does not count as another device.
 
-- **Test the weather provider** — performs a live request to Open-Meteo and
-  shows the current temperature and humidity under the button.
-- **Identify a device** — pick one of your devices in the list and it will
-  signal itself (the demo light "blinks" in the logs).
+Every command is answered within 4 seconds (Gladys waits 5 seconds). A
+command that left without a confirmation from the Envy in time is reported
+"sent, without confirmation"; a command the Envy refused (`ERROR`) is
+reported refused; a command that could not leave is reported "nothing sent".
+The Envy is read again 5 seconds after each command.
 
-## Scenes
+## Configuration button
 
-The integration adds its own cards to the scene editor (Gladys 5.1 or
-later), under the **Integrations** category:
+- **Check the Envy units**: reads each Envy when the refresh interval has
+  passed, otherwise shows the last read and when the next one comes.
 
-- **Motion detected** (trigger) — starts the scene when a demo motion sensor
-  sees something move. Optionally pick the sensor and what moved (person,
-  animal); left empty, any detection matches. The following actions can
-  read what moved with `{{triggerEvent.data.target}}`.
-- **Identify a device** (action) — makes the chosen device signal itself.
-  It returns whether the device could signal itself, so the following
-  actions can depend on it.
+## Refresh, status and limits
 
-## Dashboard
+- Each Envy is read every 30 seconds by default (10 to 300), in one short
+  connection closed at once. Never more often: neither a reconnection to
+  Gladys, a save of an unchanged configuration, the button, nor a restart of
+  the container (the time of the last attempt is kept in `/data`) reads
+  sooner.
+- An Envy that does not answer shows power 0 and "Off or standby", and is
+  listed in the status of the integration.
+- Gladys admits 300 states per minute per integration: only the values that
+  change are sent, and beyond that, the latest value of each feature waits
+  for the next minute.
 
-Add the **Demo status** widget to a dashboard: it shows the live
-temperature of the weather station and the power of the office plug, the
-connection the plug currently uses (orange when degraded) and the observed
-location. Its **Identify the light** button makes the demo light signal
-itself.
+## Data and privacy
 
-## Troubleshooting
+The integration keeps in `/data/madvr.json` the known Envy units (MAC address,
+IP address, port) and the time of the last read. The protocol has no
+password: no secret is asked nor kept. Nothing leaves your local network.
 
-The integration logs everything it does: check the integration logs from the
-Gladys UI (or `docker logs` on the host) with `LOG_LEVEL=debug` for the full
-detail.
+## Known limits
+
+- The Envy answers only when on: off or in standby, the integration cannot
+  tell them apart ("Off or standby").
+- The active profile is not read yet; the profiles offered are the numbers 1
+  to 9 of each group, without their names.
+- No restart, on-screen message or menus yet.
+- Never tested with a real device: the real answers may differ.

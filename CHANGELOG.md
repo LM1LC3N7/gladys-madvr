@@ -12,44 +12,28 @@ the notes of the version's GitHub Release.
 
 ### Added
 
-- A working example of scene triggers, scene actions and dashboard widgets
-  (Gladys 5.1.0 or later).
-- `CHANGELOG.md`, rolled by the Release workflow.
-- A GitHub Release for every version, with its changelog section as notes: the
-  Gladys Supervision page links each version to the repository's releases.
-- CI runs the tests on Node 22 and 24, and builds the Docker image.
-- Dependabot keeps the npm dependencies and the GitHub Actions up to date.
-- `SECURITY.md` (how to report a vulnerability) and `CLAUDE.md` (project rules
-  for contributors and coding assistants).
-- Manifest tests: `version` matches `package.json`, `docker_image` is tagged
-  with it, descriptions hold 10 to 100 characters, placeholders are
-  multi-language objects.
-- The latitude and longitude fields show an example value as placeholder.
+- madVR Envy video processors over their local IP control protocol (TCP
+  44077), without any cloud: added by IP address, identified by their MAC
+  address.
+- Power state (read only) and power status (On, Off or standby), input
+  signal, HDR, input and output resolution, frame rate and dynamic range,
+  input color format and aspect ratio, detected aspect and masking ratios,
+  GPU, HDMI, CPU and mainboard temperatures.
+- "Power on" (Wake-on-LAN sent by Gladys, only when the Envy does not answer,
+  repeated until it does), "Standby" and "Power off" buttons (no switch),
+  profiles, tone mapping on / off and remote keys (never Power).
+- Standby and Power off never wait behind a read or a command and cancel a
+  Power on waiting or in progress. Every command is checked against the MAC
+  address of the Envy just before it leaves, and answered to Gladys within 4
+  seconds: refused, "sent, without confirmation" or "nothing sent".
+- Reads never more often than the refresh interval (30 s by default), even
+  after a restart, a reconnection or with the "Check the Envy units" button;
+  at most 300 states per minute in all.
 
-### Changed
+### Security
 
-- Node.js 22 or later is required (Node 20 is end-of-life).
-- Integration SDK 0.15.0. The tests now run against the fake Gladys of the
-  SDK, which refuses the payloads Gladys refuses.
-- The refresh interval is one minute minimum, the fastest Gladys polls a
-  device. The plug's power is only sent when it changes, and every 30
-  minutes otherwise.
+- Answers bounded (512-byte lines, 64 waiting, 400 per session), printable
+  ASCII only, every value checked against a strict pattern; only MAC
+  addresses are keys in `/data`, and its tables have no prototype.
 
-### Fixed
-
-- Gladys refused the devices of the Discovery tab: the weather station and
-  the plug declared their poll frequency in seconds instead of one of the
-  values Gladys accepts, and were never polled. They now poll every minute,
-  and the readings follow the refresh interval of the configuration.
-
-- The release commit no longer fails `npm run format:check`: the Release
-  workflow updates the manifest `version` and `docker_image` in place instead
-  of re-printing the whole file with `jq`.
-- The integration can write to `/data`: the image creates the directory owned
-  by the `node` user, a new Docker volume was owned by root.
-- A sub-container running the integration's own image follows it to the new
-  tag at each release, as well as in the manifest of the build summary: it kept
-  the previous tag, which may not exist on the registry. Sub-containers on a
-  third-party image (a broker, a database...) keep theirs.
-
-[Unreleased]: https://github.com/GladysAssistant/integration-template-js/commits/main
+[Unreleased]: https://github.com/LM1LC3N7/gladys-madvr/commits/main

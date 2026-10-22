@@ -1,67 +1,106 @@
-# Template de démonstration
+# madVR Envy pour Gladys
 
-Ceci est la documentation utilisateur de l'intégration. Gladys ré-héberge ce
-fichier et affiche un lien **Documentation** permanent vers lui dans l'écran
-de configuration (dans la langue de l'utilisateur, avec l'anglais en repli) —
-c'est au moment de configurer que l'utilisateur en a le plus besoin. Gardez
-les courtes indications d'accueil dans les blocs `section` du `config_schema`
-du manifest ; mettez ici le pas-à-pas détaillé (captures d'écran, dépannage…).
+Suivez et pilotez vos processeurs vidéo **madVR Envy** (Envy Core, Pro,
+Extreme) depuis Gladys, en local, sans aucun cloud : état de marche, signal
+d'entrée et de sortie (résolution, fréquence, HDR), format d'image détecté,
+températures internes, allumage, veille, extinction, profils, tone mapping et
+touches de télécommande.
+
+> **Important.** Cette intégration n'a jamais été testée avec un vrai
+> appareil : elle a été écrite d'après la bibliothèque `py-madvr2` (celle de
+> Home Assistant) et testée avec un faux Envy seulement. Vos retours sont les
+> bienvenus. Intégration non officielle, sans lien avec madVR Labs.
+
+## Installation
+
+1. Branchez l'Envy sur votre réseau et donnez-lui une **adresse IP fixe** dans
+   votre box (bail DHCP réservé).
+2. Allumez l'Envy : il n'écoute le réseau (port TCP 44077) qu'allumé.
+3. Dans Gladys, installez l'intégration **madVR Envy** et acceptez
+   l'autorisation **Wake-on-LAN** (Gladys envoie elle-même le paquet de réveil
+   sur votre réseau).
+4. Ouvrez sa configuration et saisissez les adresses IP, séparées par des
+   virgules (par exemple `192.168.1.60` ; port 44077 par défaut, un autre sous
+   la forme `192.168.1.60:44078`).
+5. L'Envy apparaît dans l'onglet **Découverte** : créez-le.
+
+La première fois, l'Envy doit être allumé : l'intégration lit son adresse
+MAC, qui l'identifie ensuite (et sert au Wake-on-LAN) ; son adresse IP peut
+changer : saisissez la nouvelle.
 
 ## Ce que vous obtenez
 
-Six appareils de démonstration apparaissent après l'installation : une
-station météo (vraies données Open-Meteo), un interrupteur, une lampe
-variable, une prise connectée avec mesure de puissance, un détecteur de
-mouvement et une caméra.
+| Fonction                                          | Type Gladys                    | Remarque                                                    |
+| ------------------------------------------------- | ------------------------------ | ----------------------------------------------------------- |
+| Marche                                            | état binaire (lecture seule)   | 1 quand l'Envy répond, 0 sinon (éteint ou en veille)        |
+| État de marche                                    | texte (lecture seule)          | en anglais : On, Off or standby                             |
+| Allumer (Wake-on-LAN)                             | bouton                         | envoyé seulement quand l'Envy ne répond pas                 |
+| Veille, Éteindre                                  | boutons                        | jamais bloqués, voir plus bas                               |
+| Signal en entrée, Entrée HDR                      | états binaires (lecture seule) | HDR : HDR10, HLG…                                           |
+| Résolution, fréquence, dynamique, couleur, format | textes (lecture seule)         | du signal d'entrée, par exemple 3840x2160, 23.976p, HDR10   |
+| Résolution, fréquence, dynamique de sortie        | textes (lecture seule)         |                                                             |
+| Format d'image détecté, masquage                  | textes (lecture seule)         | par exemple 2.40:1 (Panavision)                             |
+| Températures GPU, HDMI, CPU, carte mère           | température de l'appareil, °C  | hors des moyennes de la pièce                               |
+| Activer un profil                                 | liste                          | profils Source, Display ou Custom 1 à 9                     |
+| Tone mapping activé / désactivé                   | boutons                        |                                                             |
+| Touche                                            | liste                          | Menu, flèches, OK, Input, Settings, couleurs (jamais Power) |
 
-## Configuration
+Volontairement, aucun **interrupteur** : un « éteins tout » ou « allume
+tout » d'un assistant vocal ou d'une scène n'allume ni n'éteint jamais votre
+Envy. Utilisez les boutons dans vos scènes.
 
-1. Ouvrez l'onglet **Configuration** de l'intégration.
-2. Renseignez la **latitude** et la **longitude** que la station météo de
-   démonstration doit observer (Paris par défaut), et choisissez votre unité
-   de température. L'**intervalle de rafraîchissement** règle la fréquence
-   de lecture de la station météo et de la puissance de la prise : toutes
-   les 5 minutes par défaut, toutes les minutes au plus.
-3. Enregistrez : les appareils apparaissent dans l'onglet **Découverte**,
-   prêts à être ajoutés.
+## Commandes
 
-Le réglage **Préférer la connexion locale** pilote la prise de
-démonstration : elle affiche en badge le canal réellement utilisé (local ou
-cloud), avec un point orange quand elle fonctionne en mode dégradé (local
-refusé, bascule cloud).
+- **Veille** et **Éteindre** sont les commandes protectrices : elles partent
+  tout de suite, sans attendre une lecture ni une autre commande, et en un seul
+  essai. Elles annulent un allumage en cours ou en attente (y compris les
+  Wake-on-LAN répétés). Si l'Envy ne répond pas (déjà éteint ou en veille),
+  rien n'est envoyé et la commande réussit.
+- **Allumer** relit d'abord l'Envy : s'il répond, rien n'est envoyé ; sinon
+  Gladys envoie un paquet Wake-on-LAN à son adresse MAC, puis à nouveau toutes
+  les 10 secondes pendant 2 minutes, jusqu'à ce qu'il réponde.
+- **Profil**, **tone mapping** et **touche** ne partent que si l'Envy répond.
 
-## Actions
+Avant chaque commande, l'intégration relit l'adresse MAC de l'Envy : si un
+autre Envy répond à cette adresse IP, rien n'est envoyé et l'adresse est
+oubliée. Une MAC illisible ne compte pas comme un autre appareil.
 
-- **Tester le fournisseur météo** — effectue une requête en direct vers
-  Open-Meteo et affiche la température et l'humidité actuelles sous le
-  bouton.
-- **Identifier un appareil** — choisissez un de vos appareils dans la liste
-  et il se signale (la lampe de démonstration « clignote » dans les logs).
+Chaque commande reçoit une réponse en moins de 4 secondes (Gladys attend 5
+secondes). Une commande partie sans confirmation de l'Envy à temps est
+signalée « envoyée, sans confirmation » ; une commande refusée par l'Envy
+(`ERROR`) est signalée comme refusée ; une commande qui n'a pas pu partir est
+signalée « rien envoyé ». L'Envy est relu 5 secondes après chaque commande.
 
-## Scènes
+## Bouton de la configuration
 
-L'intégration ajoute ses propres cartes à l'éditeur de scènes (Gladys 5.1
-ou plus récent), dans la catégorie **Intégrations** :
+- **Vérifier les Envy** : lit chaque Envy si l'intervalle de rafraîchissement
+  est écoulé, sinon montre la dernière lecture et l'heure de la prochaine.
 
-- **Mouvement détecté** (déclencheur) — lance la scène quand un détecteur
-  de démonstration voit bouger quelque chose. Choisissez éventuellement le
-  détecteur et ce qui a bougé (personne, animal) ; laissés vides, toute
-  détection correspond. Les actions suivantes peuvent lire ce qui a bougé
-  avec `{{triggerEvent.data.target}}`.
-- **Identifier un appareil** (action) — fait se signaler l'appareil choisi.
-  Elle indique si l'appareil a pu se signaler, pour que les actions
-  suivantes puissent en dépendre.
+## Rafraîchissement, statut et limites
 
-## Tableau de bord
+- Chaque Envy est lu toutes les 30 secondes par défaut (10 à 300), en une
+  courte connexion fermée aussitôt. Jamais plus souvent : ni la reconnexion à
+  Gladys, ni un enregistrement de configuration inchangée, ni le bouton, ni un
+  redémarrage du conteneur (l'heure de la dernière tentative est gardée dans
+  `/data`) ne déclenchent une lecture plus tôt.
+- Un Envy qui ne répond pas affiche la marche à 0 et « Off or standby », et
+  est cité dans le statut de l'intégration.
+- Gladys accepte 300 états par minute par intégration : seules les valeurs qui
+  changent sont envoyées, et au-delà, la dernière valeur de chaque fonction
+  attend la minute suivante.
 
-Ajoutez le widget **État de la démo** à un tableau de bord : il affiche en
-direct la température de la station météo et la puissance de la prise du
-bureau, la connexion utilisée par la prise (en orange si dégradée) et la
-position observée. Son bouton **Identifier la lampe** fait se signaler la
-lampe de démonstration.
+## Données et confidentialité
 
-## Dépannage
+L'intégration garde dans `/data/madvr.json` les Envy connus (adresse MAC,
+adresse IP, port) et l'heure de la dernière lecture. Le protocole n'a pas de
+mot de passe : aucun secret n'est demandé ni gardé. Rien ne sort de votre
+réseau local.
 
-L'intégration journalise tout ce qu'elle fait : consultez les logs de
-l'intégration depuis l'interface Gladys (ou `docker logs` sur l'hôte) avec
-`LOG_LEVEL=debug` pour le détail complet.
+## Limites connues
+
+- L'Envy ne répond qu'allumé : éteint ou en veille, l'intégration ne peut pas
+  les distinguer (« Off or standby »).
+- Le profil actif n'est pas encore lu ; les profils proposés sont les numéros
+  1 à 9 de chaque groupe, sans leurs noms.
+- Pas encore de redémarrage, de message à l'écran ni de menus.
+- Jamais testé avec un vrai appareil : les réponses réelles peuvent différer.
