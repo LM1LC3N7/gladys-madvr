@@ -10,6 +10,8 @@ the notes of the version's GitHub Release.
 
 ## [Unreleased]
 
+## [0.1.1] - 2026-10-22
+
 ### Added
 
 - madVR Envy video processors over their local IP control protocol (TCP
@@ -38,4 +40,5 @@ the notes of the version's GitHub Release.
   ASCII only, every value checked against a strict pattern; only MAC
   addresses are keys in `/data`, and its tables have no prototype.
 
-[Unreleased]: https://github.com/LM1LC3N7/gladys-madvr/commits/main
+[Unreleased]: https://github.com/LM1LC3N7/gladys-madvr/compare/v0.1.1...HEAD
+[0.1.1]: https://github.com/LM1LC3N7/gladys-madvr/releases/tag/v0.1.1

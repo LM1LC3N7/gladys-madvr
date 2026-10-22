@@ -1,6 +1,6 @@
 {
   "name": "gladys-madvr",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "private": true,
   "description": "Gladys Assistant external integration for madVR Envy video processors (power state, input and output signal, HDR, aspect ratio, temperatures, Wake-on-LAN, standby, power off, profiles, tone mapping, remote keys), over their local IP control protocol (TCP 44077). Unofficial, not affiliated with madVR Labs.",
   "type": "module",
