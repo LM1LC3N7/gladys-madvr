@@ -53,23 +53,42 @@ Envy. Utilisez les boutons dans vos scènes.
 
 - **Veille** et **Éteindre** sont les commandes protectrices : elles partent
   tout de suite, sans attendre une lecture ni une autre commande, et en un seul
-  essai. Elles annulent un allumage en cours ou en attente (y compris les
-  Wake-on-LAN répétés). Si l'Envy ne répond pas (déjà éteint ou en veille),
-  rien n'est envoyé et la commande réussit.
+  essai. Elles annulent toute commande en cours ou en attente (Allumer et ses
+  Wake-on-LAN répétés compris) : rien de ce qui attendait ne part après
+  elles. Si l'Envy ne répond pas :
+  - dans les 2 minutes qui suivent un Wake-on-LAN (il démarre peut-être) : la
+    commande est refusée « does not answer yet: Standby will be sent once it
+    answers, nothing sent yet » (rien n'est encore envoyé), et l'intégration
+    l'envoie une fois, dès que l'Envy répond pendant ces 2 minutes (un nouvel
+    appui sur Allumer l'annule) ;
+  - sinon : elle réussit (rien à envoyer) seulement si la dernière lecture,
+    faite dans l'intervalle de rafraîchissement, avait déjà trouvé l'Envy
+    muet ; sinon elle est refusée « does not answer, nothing sent ».
 - **Allumer** relit d'abord l'Envy : s'il répond, rien n'est envoyé ; sinon
   Gladys envoie un paquet Wake-on-LAN à son adresse MAC, puis à nouveau toutes
-  les 10 secondes pendant 2 minutes, jusqu'à ce qu'il réponde.
+  les 10 secondes pendant 2 minutes, jusqu'à ce qu'il réponde. Si la lecture
+  qui vient de finir (5 secondes au plus) l'a trouvé muet, ou si son adresse
+  est inconnue, le Wake-on-LAN part tout de suite (seule la MAC est
+  nécessaire). Si Gladys répond « trop de demandes », le paquet est redemandé
+  une fois 2 secondes plus tard ; si Gladys ne répond pas ou échoue, la
+  commande est signalée « Wake-on-LAN peut-être envoyé, sans confirmation de
+  Gladys » et les renvois continuent.
 - **Profil**, **tone mapping** et **touche** ne partent que si l'Envy répond.
 
 Avant chaque commande, l'intégration relit l'adresse MAC de l'Envy : si un
 autre Envy répond à cette adresse IP, rien n'est envoyé et l'adresse est
-oubliée. Une MAC illisible ne compte pas comme un autre appareil.
+oubliée. Une MAC donnée mais illisible (ou refusée par `ERROR`) ne compte pas
+comme un autre appareil : la commande part. Une MAC sans réponse à temps
+arrête un profil, un tone mapping ou une touche (« rien envoyé »), jamais la
+Veille ni l'Arrêt (envoyés dans une nouvelle connexion). Une lecture dont la
+MAC ne répond pas ne publie rien et garde les valeurs connues.
 
 Chaque commande reçoit une réponse en moins de 4 secondes (Gladys attend 5
 secondes). Une commande partie sans confirmation de l'Envy à temps est
 signalée « envoyée, sans confirmation » ; une commande refusée par l'Envy
 (`ERROR`) est signalée comme refusée ; une commande qui n'a pas pu partir est
-signalée « rien envoyé ». L'Envy est relu 5 secondes après chaque commande.
+signalée « rien envoyé ». L'Envy est relu 5 secondes après la dernière d'une
+série de commandes, et pas du tout si rien n'est parti.
 
 ## Bouton de la configuration
 
@@ -85,6 +104,10 @@ signalée « rien envoyé ». L'Envy est relu 5 secondes après chaque commande.
   `/data`) ne déclenchent une lecture plus tôt.
 - Un Envy qui ne répond pas affiche la marche à 0 et « Off or standby », et
   est cité dans le statut de l'intégration.
+- Si un autre Envy répond à l'adresse d'un Envy créé (adresse changée), ce
+  dernier affiche aussi la marche à 0 et « Off or standby » : c'est une
+  supposition (il est peut-être allumé à sa nouvelle adresse), jusqu'à ce que
+  vous saisissiez sa nouvelle adresse.
 - Gladys accepte 300 états par minute par intégration : seules les valeurs qui
   changent sont envoyées, et au-delà, la dernière valeur de chaque fonction
   attend la minute suivante.

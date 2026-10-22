@@ -62,10 +62,14 @@ test/                             node --test, against the SDK's fake Gladys and
 - **No switch.** Power on, Standby and Power off are `button/push`; the power
   state is read only. An "everything off" must never reach an Envy.
 - **Protective commands** (Standby, Power off): out of any queue, never behind
-  a read, one try, never blocked; they cancel a Power on waiting or in
-  progress (`epochs`, checked just before Wake-on-LAN).
+  a read, one try, never blocked; they cancel every queued command and a
+  Power on in progress (`epochs`, checked at the start and just before the
+  line or the Wake-on-LAN leaves). An Envy not answering is acked only when a
+  recent read already said so; within the wake window they are refused and
+  sent once when it answers (`reaffirms`).
 - **Commands**: validated before queueing; the MAC read from the Envy just
-  before acting (only a valid, different MAC is another Envy); the deadline
+  before acting (only a valid, different MAC is another Envy; a MAC not
+  answered in time stops the non-protective commands); the deadline
   checked again just before the line leaves; the answer to Gladys within the
   3.5 s budget, never waiting for a publication; exact outcomes: refused,
   "sent, without confirmation", "nothing sent".

@@ -89,21 +89,22 @@ up to date at the end of every milestone.
   while another command waits. They bump a per-Envy epoch: a Power on
   queued or in progress checks it just before Wake-on-LAN and is dropped
   ("Cancelled by a standby or power off, nothing sent"), and the Wake-on-LAN
-  chain stops. An Envy that does not answer is already off or in standby:
-  nothing sent, acked as a success (logged). The MAC is read first: another
-  valid MAC refuses (nothing sent, address forgotten); an unread one does not
-  block (the command goes in a new session, time allowing). No automatic
-  re-sending of a standby (no reaffirmation chain to keep).
+  chain stops. When the Envy does not answer, see review 1 (I1). The MAC is
+  read first: another valid MAC refuses (nothing sent, address forgotten);
+  an unanswered one does not block (the command goes in a new session, time
+  allowing).
 - Other commands (profile `ActivateProfile <SOURCE|DISPLAY|CUSTOM> <1..9>`,
   `ToneMapOn` / `ToneMapOff`, `KeyPress <key>` without POWER): validated
   before queueing (no connection for an invalid one), serialized per Envy,
   budget 3.5 s from the Gladys request (wait in the queue included), the MAC
-  read just before (an unread MAC refuses them: nothing sent), the deadline
+  read just before (a MAC not answered in time refuses them: nothing sent;
+  a MAC answered but unreadable, or refused with ERROR, lets them go), the deadline
   checked again just before the line leaves. `OK` = done, `ERROR` = refused
   (exact message), no answer in time = "Sent, without confirmation from the
   madVR Envy". There is no readable value to confirm them against (the Envy
   reports no tone mapping state, the profile is not read in v1): the `OK` is
-  the confirmation. The Envy is read again 5 s after each command.
+  the confirmation. The Envy is read again 5 s after the last command of a
+  series (one timer per Envy, pushed back), never when nothing left.
 - Sessions: one per read and per command, closed with `Bye` (no heartbeat
   needed, nothing kept open); connection 2 s, each answer 1.5 s (py-madvr:
   1 s / 0.5 s on a local network, more margin here).
@@ -144,3 +145,40 @@ up to date at the end of every milestone.
   `lastAttempt` is capped at now.
 - No network discovery: the Envy announces nothing py-madvr or Home Assistant
   browses; the addresses are typed. No Bluetooth.
+- (Review 1, 2026-10-22) Fixes:
+  - I1: the time of the last Wake-on-LAN emitted (or maybe emitted) is kept
+    per MAC (`lastWake`, memory; a standby never clears it). Standby / Power
+    off on an Envy that does not answer: within `wakeWait` (2 min) of that
+    time, refused "does not answer yet (starting after a power on?): <command>
+    will be sent once it answers, nothing sent yet" and armed for one
+    reaffirmation: the reads every `wakeStep` send it once as soon as the Envy
+    answers in the window (its own session, MAC checked; a new Power on, a
+    `PowerOff` / `Standby` notification or the end of the window drops it).
+    Outside the window: acked only when the last read, at most one interval
+    (+ read budget) old, already said "does not answer"; else refused
+    "does not answer, nothing sent".
+  - I2: Power on goes straight to Wake-on-LAN when the read that just ended
+    (`freshRead`, 5 s) said "does not answer" (the case of a Power on queued
+    behind a read waiting for its connection timeout), and otherwise opens
+    with the deadline minus `wakeReserve` (0.5 s) so the Wake-on-LAN request
+    still fits. Background reads are not made preemptible (not needed then).
+  - M1: background work (`later`) is tied to `stop()` only (`life`), not to
+    the configuration generation; a read dropped for an older configuration
+    still drives the Wake-on-LAN and reaffirmation chains.
+  - M2: `OK` / `ERROR` lines waiting before a write are dropped: never taken
+    for the ack of the next command (notifications are kept).
+  - M3: every queued command carries the epoch; a Standby / Power off asked
+    meanwhile drops it at its start or just before its line leaves
+    ("Cancelled by a standby or power off, nothing sent").
+  - M4: `wakeOnLan` answered 429: asked once more `wakeRetry` (2 s) later when
+    the budget allows; another 4xx: "nothing sent"; no answer, a network error
+    or a 5xx: "Wake-on-LAN maybe sent, without confirmation from Gladys", the
+    wake window and the chain start.
+  - M5: one recheck timer per Envy, pushed back by each command; none when
+    nothing left.
+  - M6: a read whose `GetMacAddress` is not answered is unknown (nothing
+    published, the known reading kept); a request failing in a read keeps
+    the value known before.
+  - M7: docs aligned on the MAC rules above. M8: Power on with the MAC only
+    (address unknown) sends Wake-on-LAN. M9: docs say that an Envy whose
+    address went to another one is shown "Off or standby" by assumption.

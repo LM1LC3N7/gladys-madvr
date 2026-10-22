@@ -22,10 +22,12 @@ the notes of the version's GitHub Release.
 - "Power on" (Wake-on-LAN sent by Gladys, only when the Envy does not answer,
   repeated until it does), "Standby" and "Power off" buttons (no switch),
   profiles, tone mapping on / off and remote keys (never Power).
-- Standby and Power off never wait behind a read or a command and cancel a
-  Power on waiting or in progress. Every command is checked against the MAC
-  address of the Envy just before it leaves, and answered to Gladys within 4
-  seconds: refused, "sent, without confirmation" or "nothing sent".
+- Standby and Power off never wait behind a read or a command and cancel the
+  commands waiting and a Power on in progress; asked while the Envy starts
+  after Wake-on-LAN, they are sent once it answers. A Power on asked right
+  after a read found the Envy off goes straight to Wake-on-LAN.
+  Every command is checked against the MAC address of the Envy just before it
+  leaves, and answered to Gladys within 4 seconds: refused, "sent, without confirmation" or "nothing sent".
 - Reads never more often than the refresh interval (30 s by default), even
   after a restart, a reconnection or with the "Check the Envy units" button;
   at most 300 states per minute in all.

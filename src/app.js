@@ -45,12 +45,15 @@ const READS = [
   ['GetTemperatures', ['Temperatures']],
 ];
 
+const cancelledError = () =>
+  new EnvyError(ERROR_KINDS.CANCELLED, `Cancelled by a standby or power off, ${NOTHING_SENT}`);
+
 /** Queue priorities: the commands, then the background reads. */
 const PRIORITY = Object.freeze({ COMMAND: 0, BACKGROUND: 1 });
 
 /** An error with the exact outcome: refused, sent without confirmation, or nothing sent. */
 function outcome(err) {
-  if (err?.sent && err.kind === ERROR_KINDS.REFUSED) {
+  if (err?.sent && (err.kind === ERROR_KINDS.REFUSED || err.exact)) {
     return err;
   }
   if (err?.sent) {
@@ -105,6 +108,16 @@ export class EnvyApp {
     this.wakes = new Map();
     /** mac -> count of protective commands: a Power on started before one is cancelled */
     this.epochs = new Map();
+    /** mac -> time of the last Wake-on-LAN emitted (or maybe emitted); never cleared by a standby */
+    this.lastWake = new Map();
+    /** mac -> time of the last read that gave a known outcome (answering or not) */
+    this.readAt = new Map();
+    /** mac -> { words, until, timer }: a Standby / Power off sent once the starting Envy answers */
+    this.reaffirms = new Map();
+    /** mac -> timer of the one read planned after commands (pushed back by each command) */
+    this.rechecks = new Map();
+    /** Bumped by stop() only: background work (Wake-on-LAN chain, rechecks) survives configuration saves. */
+    this.life = 0;
     /** Time of the last read attempt (memory), and of the one written to /data. */
     this.lastAttempt = undefined;
     this.attemptSavedAt = undefined;
@@ -197,6 +210,7 @@ export class EnvyApp {
   stop() {
     this.started = false;
     this.generation += 1;
+    this.life += 1;
     this.roundTimers.clearTimeout(this.roundTimer);
     this.roundTimer = undefined;
     for (const handle of this.backgroundTimers) {
@@ -204,6 +218,8 @@ export class EnvyApp {
     }
     this.backgroundTimers.clear();
     this.wakes.clear();
+    this.reaffirms.clear();
+    this.rechecks.clear();
     this.publisher.stop();
     if (this.persistTimer) {
       this.timers.clearTimeout(this.persistTimer);
@@ -297,18 +313,22 @@ export class EnvyApp {
     }
   }
 
-  /** Background work, cancelled by stop(). */
+  /**
+   * Background work, cancelled by stop() only (a configuration save never
+   * drops a Wake-on-LAN chain, a reaffirmation or a recheck).
+   */
   later(task, ms) {
-    const generation = this.generation;
+    const life = this.life;
     const handle = this.timers.setTimeout(() => {
       this.backgroundTimers.delete(handle);
-      if (generation === this.generation) {
+      if (life === this.life) {
         Promise.resolve()
           .then(task)
           .catch((err) => this.logger.debug?.(`Background task failed: ${err.message}`));
       }
     }, ms);
     this.backgroundTimers.add(handle);
+    return handle;
   }
 
   persist() {
@@ -592,9 +612,17 @@ export class EnvyApp {
         address,
         this.now() + this.timings.pollBudget,
         async (session) => {
-          const line = await this.soft(() =>
-            session.command(['GetMacAddress'], { expect: ['MacAddress'] }),
-          );
+          let line;
+          try {
+            line = await session.command(['GetMacAddress'], { expect: ['MacAddress'] });
+          } catch (err) {
+            if (err.kind !== ERROR_KINDS.REFUSED) {
+              // No answer in time: the identity is not checked, nothing is
+              // published as read (what was known is kept).
+              this.logger.debug?.(`${deviceName(device)}: MAC address not answered`);
+              return undefined;
+            }
+          }
           const mac = parseMac(line?.args);
           if (mac && mac !== device.mac) {
             other = mac;
@@ -613,6 +641,22 @@ export class EnvyApp {
           for (const parsed of session.received) {
             applyLine(result, parsed);
           }
+          // A request that failed this time keeps the value known before.
+          const previous = this.readings.get(device.mac);
+          if (previous && !previous.goingOff && !result.goingOff) {
+            for (const key of [
+              'signal',
+              'incoming',
+              'outgoing',
+              'aspect',
+              'masking',
+              'temperatures',
+            ]) {
+              if (!(key in result) && previous[key] !== undefined) {
+                result[key] = previous[key];
+              }
+            }
+          }
           return result;
         },
       );
@@ -623,6 +667,10 @@ export class EnvyApp {
       }
     }
     if (generation !== this.generation) {
+      // Read for an older configuration: nothing published, but the chains
+      // waiting for the Envy go on.
+      this.followWake(device, undefined);
+      this.followReaffirm(device, undefined);
       return undefined;
     }
     if (other) {
@@ -635,9 +683,11 @@ export class EnvyApp {
     // An unknown answer keeps what was known.
     if (reading !== undefined) {
       this.readings.set(device.mac, reading);
+      this.readAt.set(device.mac, this.now());
     }
     await this.publishStates(device);
     this.followWake(device, reading);
+    this.followReaffirm(device, reading);
     return reading;
   }
 
@@ -662,8 +712,26 @@ export class EnvyApp {
     }
   }
 
+  /** One read after commands: each command pushes the planned read back. */
   recheck(device) {
-    this.later(() => this.queueRead(device), this.timings.recheckDelay);
+    const previous = this.rechecks.get(device.mac);
+    if (previous !== undefined) {
+      this.timers.clearTimeout(previous);
+      this.backgroundTimers.delete(previous);
+    }
+    const handle = this.later(() => {
+      if (this.rechecks.get(device.mac) === handle) {
+        this.rechecks.delete(device.mac);
+      }
+      return this.queueRead(device);
+    }, this.timings.recheckDelay);
+    this.rechecks.set(device.mac, handle);
+  }
+
+  /** Whether the last read, recent enough, said the Envy does not answer. */
+  freshlyOff(device, within) {
+    const at = this.readAt.get(device.mac);
+    return this.readings.get(device.mac) === null && at !== undefined && this.now() - at <= within;
   }
 
   // --- Power on (Wake-on-LAN) ------------------------------------------------------------
@@ -679,6 +747,7 @@ export class EnvyApp {
       }
       throw err;
     }
+    this.lastWake.set(device.mac, this.now());
     if (this.wakeRefused) {
       this.wakeRefused = false;
       this.updateStatus().catch(() => {});
@@ -726,6 +795,60 @@ export class EnvyApp {
       );
       await this.queueRead(device);
     }, this.timings.wakeStep);
+  }
+
+  /**
+   * After each read: a Standby / Power off asked while the Envy was starting
+   * (after a Wake-on-LAN) is sent once, as soon as it answers; dropped at the
+   * end of the wake window, or by a new Power on.
+   */
+  followReaffirm(device, reading) {
+    const entry = this.reaffirms.get(device.mac);
+    if (!entry) {
+      return;
+    }
+    if (reading?.goingOff) {
+      this.reaffirms.delete(device.mac);
+      return;
+    }
+    if (reading) {
+      this.reaffirms.delete(device.mac);
+      this.sendReaffirm(device, entry.words).catch((err) =>
+        this.logger.warn(`${deviceName(device)}: ${entry.words[0]} not sent (${err.message})`),
+      );
+      return;
+    }
+    if (this.now() > entry.until) {
+      this.reaffirms.delete(device.mac);
+      this.logger.warn(
+        `${deviceName(device)} did not answer after Wake-on-LAN: ${entry.words[0]} not sent`,
+      );
+      return;
+    }
+    if (entry.timer) {
+      return;
+    }
+    entry.timer = true;
+    this.later(() => {
+      entry.timer = false;
+      if (this.reaffirms.get(device.mac) !== entry) {
+        return undefined;
+      }
+      return this.queueRead(device);
+    }, this.timings.wakeStep);
+  }
+
+  /** The reaffirmed Standby / Power off: one try, its own session, the MAC checked first. */
+  async sendReaffirm(device, words) {
+    const context = { mayHaveSent: false };
+    try {
+      await this.protectiveSend(device, words, this.now(), context);
+      this.logger.info(`${deviceName(device)}: ${words[0]} sent once it answered`);
+    } finally {
+      if (context.mayHaveSent) {
+        this.recheck(device);
+      }
+    }
   }
 
   // --- Commands --------------------------------------------------------------------
@@ -780,10 +903,19 @@ export class EnvyApp {
         throw outcome(err);
       });
     } else {
+      if (action.kind === 'power_on') {
+        // A new Power on drops a standby waiting for the Envy to answer.
+        this.reaffirms.delete(device.mac);
+      }
+      // Every queued command carries the epoch: a Standby / Power off asked
+      // meanwhile drops it, nothing leaves after them.
       const epoch = this.epochs.get(device.mac) ?? 0;
       run = this.enqueue(
         device.mac,
         async () => {
+          if (this.cancelled(device, epoch)) {
+            throw cancelledError();
+          }
           if (context.late || this.remaining(started) < 50) {
             // Gladys stopped waiting while this command was queued: dropped, never sent late.
             context.late = true;
@@ -855,35 +987,65 @@ export class EnvyApp {
 
   /**
    * Standby / Power off: out of the queue, never behind a read, one try.
-   * They cancel any Power on waiting or in progress. An Envy that does not
-   * answer is already off or in standby: nothing to send. The identity is
-   * checked first; when it cannot be read, the command is still sent (in a
-   * new session if that one broke), time allowing.
+   * They cancel any command queued or in progress (Power on and its
+   * Wake-on-LAN chain included). When the Envy does not answer:
+   * - within the wake window of a Wake-on-LAN (it may be starting): refused
+   *   "nothing sent yet", and sent once, as soon as a read sees it answer;
+   * - otherwise: acked only when the last read, recent, already said it does
+   *   not answer; else refused "does not answer, nothing sent".
    */
   async protective(device, words, started, context) {
     this.epochs.set(device.mac, (this.epochs.get(device.mac) ?? 0) + 1);
     this.wakes.delete(device.mac);
+    this.reaffirms.delete(device.mac);
     const name = deviceName(device);
+    try {
+      await this.protectiveSend(device, words, started, context);
+    } catch (err) {
+      if (err.kind !== ERROR_KINDS.UNREACHABLE || err.lost || !device.host) {
+        throw err;
+      }
+      const wokeAt = this.lastWake.get(device.mac);
+      if (wokeAt !== undefined && this.now() - wokeAt < this.timings.wakeWait) {
+        const entry = { words, until: wokeAt + this.timings.wakeWait, timer: false };
+        this.reaffirms.set(device.mac, entry);
+        this.followReaffirm(device, undefined);
+        throw new EnvyError(
+          ERROR_KINDS.UNREACHABLE,
+          `${name} does not answer yet (starting after a power on?): ${words[0]} will be sent once it answers, ${NOTHING_SENT} yet`,
+        );
+      }
+      if (this.freshlyOff(device, this.config.pollInterval * 1000 + this.timings.pollBudget)) {
+        this.logger.info(
+          `${name} does not answer (already off or standby): ${words[0]} not needed`,
+        );
+        return undefined;
+      }
+      throw new EnvyError(ERROR_KINDS.UNREACHABLE, `${name} does not answer, ${NOTHING_SENT}`);
+    } finally {
+      if (context.mayHaveSent) {
+        this.recheck(device);
+      }
+    }
+    this.logger.info(`${name}: ${words[0]} sent`);
+    return undefined;
+  }
+
+  /**
+   * One protective line in its own session. The identity is checked first;
+   * when it cannot be read, the line is still sent (in a new session if that
+   * one broke), time allowing.
+   */
+  async protectiveSend(device, words, started, context) {
     if (!device.host) {
       throw new EnvyError(
         ERROR_KINDS.UNREACHABLE,
-        `${name}: address unknown, type its new address in the configuration, ${NOTHING_SENT}`,
+        `${deviceName(device)}: address unknown, type its new address in the configuration, ${NOTHING_SENT}`,
       );
     }
     const address = this.addressOf(device);
     const deadline = started + this.timings.commandBudget;
-    let session;
-    try {
-      session = await this.open(address, deadline);
-    } catch (err) {
-      if (err.kind === ERROR_KINDS.UNREACHABLE) {
-        this.logger.info(
-          `${name} does not answer (off or standby already): ${words[0]} not needed`,
-        );
-        return undefined;
-      }
-      throw err;
-    }
+    let session = await this.open(address, deadline);
     try {
       const until = Math.min(deadline, this.now() + this.timings.preRead);
       const identity = await this.checkIdentity(session, device, until);
@@ -899,14 +1061,22 @@ export class EnvyApp {
       });
     } finally {
       session.close();
-      this.recheck(device);
     }
-    this.logger.info(`${name}: ${words[0]} sent`);
-    return undefined;
+  }
+
+  cancelled(device, epoch) {
+    return (this.epochs.get(device.mac) ?? 0) !== epoch;
   }
 
   async command(device, action, started, context, epoch) {
     const name = deviceName(device);
+    if (action.kind === 'power_on') {
+      // Wake-on-LAN needs the MAC only: without an address, or when the read
+      // that just ended said it does not answer, no new connection first.
+      if (!device.host || this.freshlyOff(device, this.timings.freshRead)) {
+        return this.wake(device, started, context, epoch);
+      }
+    }
     if (!device.host) {
       throw new EnvyError(
         ERROR_KINDS.UNREACHABLE,
@@ -916,7 +1086,11 @@ export class EnvyApp {
     const deadline = started + this.timings.commandBudget;
     let session;
     try {
-      session = await this.open(this.addressOf(device), deadline);
+      // Power on keeps a reserve for the Wake-on-LAN request.
+      session = await this.open(
+        this.addressOf(device),
+        action.kind === 'power_on' ? deadline - this.timings.wakeReserve : deadline,
+      );
     } catch (err) {
       if (err.kind !== ERROR_KINDS.UNREACHABLE) {
         throw err;
@@ -939,45 +1113,91 @@ export class EnvyApp {
       await session.command(action.words, {
         until: deadline,
         beforeWrite: () => {
+          if (this.cancelled(device, epoch)) {
+            throw cancelledError();
+          }
           context.mayHaveSent = true;
         },
       });
     } finally {
       session.close();
+      if (context.mayHaveSent) {
+        this.recheck(device);
+      }
     }
-    this.recheck(device);
     return undefined;
   }
 
-  /** Power on when the Envy does not answer: Wake-on-LAN, unless a protective command came. */
+  /**
+   * Power on when the Envy does not answer: Wake-on-LAN, unless a protective
+   * command came. A 429 (Gladys emits one per 2 s) is tried again once when
+   * the budget allows; a 4xx is "nothing sent"; a network error or a 5xx may
+   * have let the packet out: "maybe sent, without confirmation".
+   */
   async wake(device, started, context, epoch) {
-    if ((this.epochs.get(device.mac) ?? 0) !== epoch) {
-      throw new EnvyError(
-        ERROR_KINDS.CANCELLED,
-        `Cancelled by a standby or power off, ${NOTHING_SENT}`,
-      );
-    }
-    if (context.late || this.remaining(started) < 50) {
-      throw new EnvyError(ERROR_KINDS.BUDGET, `No time left for this command, ${NOTHING_SENT}`);
-    }
+    const check = () => {
+      if (this.cancelled(device, epoch)) {
+        throw cancelledError();
+      }
+      if (context.late || this.remaining(started) < 50) {
+        throw new EnvyError(ERROR_KINDS.BUDGET, `No time left for this command, ${NOTHING_SENT}`);
+      }
+    };
+    check();
     context.mayHaveSent = true;
-    try {
-      await this.sendWake(device);
-    } catch (err) {
-      context.mayHaveSent = false;
-      throw new EnvyError(
-        ERROR_KINDS.PROTOCOL,
-        `Wake-on-LAN not sent (${err?.status ?? err?.message}), ${NOTHING_SENT}`,
+    let error;
+    for (let attempt = 0; attempt < 2; attempt += 1) {
+      try {
+        await this.sendWake(device);
+        error = undefined;
+        break;
+      } catch (err) {
+        error = err;
+        if (
+          err?.status !== 429 ||
+          attempt > 0 ||
+          this.remaining(started) < this.timings.wakeRetry + 200
+        ) {
+          break;
+        }
+        context.mayHaveSent = false;
+        await new Promise((resolve) => setTimeout(resolve, this.timings.wakeRetry));
+        check();
+        context.mayHaveSent = true;
+      }
+    }
+    if (error) {
+      const status = error?.status;
+      if (Number.isInteger(status) && status >= 400 && status < 500) {
+        context.mayHaveSent = false;
+        throw new EnvyError(
+          ERROR_KINDS.PROTOCOL,
+          `Wake-on-LAN not sent (${status}), ${NOTHING_SENT}`,
+        );
+      }
+      // The core may have emitted it: the wake window and the chain start.
+      this.lastWake.set(device.mac, this.now());
+      this.startWakeChain(device, epoch);
+      const maybe = new EnvyError(
+        ERROR_KINDS.TIMEOUT,
+        `Wake-on-LAN maybe sent, without confirmation from Gladys (${status ?? 'no answer'})`,
+        { sent: true },
       );
+      maybe.exact = true;
+      throw maybe;
     }
     this.logger.info(`${deviceName(device)}: Wake-on-LAN sent`);
+    this.startWakeChain(device, epoch);
+    return undefined;
+  }
+
+  startWakeChain(device, epoch) {
     this.wakes.set(device.mac, {
       until: this.now() + this.timings.wakeWait,
       epoch,
       timer: false,
     });
     this.followWake(device, undefined);
-    return undefined;
   }
 
   // --- Device lifecycle --------------------------------------------------------------
@@ -1000,6 +1220,7 @@ export class EnvyApp {
     if (device) {
       this.created.delete(device.mac);
       this.wakes.delete(device.mac);
+      this.reaffirms.delete(device.mac);
       await this.updateStatus();
     }
   }

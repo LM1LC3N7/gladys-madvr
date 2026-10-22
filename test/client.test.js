@@ -66,6 +66,22 @@ test('ERROR is a refusal, sent, and the session stays usable', async (t) => {
   session.close();
 });
 
+test('M2 (S4) an OK received before the write is never taken for the ack', async (t) => {
+  const { port } = await server(t, (socket, line) => {
+    if (line === 'GetMacAddress') {
+      socket.write('OK\r\nMacAddress 00-11-22-AA-BB-CC\r\nOK\r\n');
+    }
+    if (line === 'Standby') {
+      setTimeout(() => socket.write('ERROR "busy"\r\n'), 100);
+    }
+  });
+  const session = await open(port);
+  await session.command(['GetMacAddress'], { expect: ['MacAddress'] });
+  await new Promise((resolve) => setTimeout(resolve, 30));
+  await assert.rejects(session.command(['Standby']), (err) => err.kind === ERROR_KINDS.REFUSED);
+  session.close();
+});
+
 test('a line too long closes the session', async (t) => {
   const { port } = await server(t, (socket) => socket.write('OK\r\n' + 'x'.repeat(2_000)));
   const session = await open(port);

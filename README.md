@@ -41,7 +41,8 @@ Gladys ⇄ SDK ⇄ src/handlers.js ⇄ src/app.js (EnvyApp)
   in progress. The others are serialized per Envy, the MAC read just before,
   within a 3.5 s budget (Gladys acks in 5 s), checked again just before the
   line leaves. Power on is Wake-on-LAN through Gladys (`network_wake`), sent
-  only when the Envy does not answer, repeated every 10 s for 2 minutes until
+  only when the Envy does not answer (at once when the read that just ended
+  found it silent, or with the MAC only), repeated every 10 s for 2 minutes until
   it does. Outcomes are exact: refused (`ERROR`), "sent, without
   confirmation", or "nothing sent".
 - **Features**: `button/push` (power on, standby, power off, tone mapping),

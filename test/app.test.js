@@ -10,7 +10,7 @@ import assert from 'node:assert/strict';
 import { createFakeGladys } from '@gladysassistant/integration-sdk/testing';
 import { EnvyApp } from '../src/app.js';
 import { TIMINGS } from '../src/constants.js';
-import { openSession } from '../src/envy/client.js';
+import { ERROR_KINDS, EnvyError, openSession } from '../src/envy/client.js';
 import { registerHandlers } from '../src/handlers.js';
 import { MemoryStore } from '../src/store.js';
 import { MAC_ID, startFakeEnvy } from './fixtures/fakeEnvy.js';
@@ -233,15 +233,55 @@ test('Standby: sent at once, never behind a read; Power off too', async (t) => {
   assert.deepEqual(fake.commands(), ['Standby', 'PowerOff']);
 });
 
-test('Standby when it does not answer: nothing to send, acked', async (t) => {
+test('I1 Standby when it does not answer: acked only when a recent read said so', async (t) => {
   const ctx = await setup(t);
   const device = await createDevice(ctx);
   await ctx.fake.powerOff();
+  // The last read said "on": nothing proves it is off.
+  const unproven = await press(ctx.gladys, device, 'standby');
+  assert.equal(unproven.success, false);
+  assert.match(unproven.error, /does not answer, nothing sent$/);
+  ctx.advance(31_000);
+  await ctx.app.round();
   const ack = await press(ctx.gladys, device, 'standby');
   assert.equal(ack.success, true, ack.error);
-  assert.ok(ctx.logs.some((l) => /off or standby already/.test(l)));
+  assert.ok(ctx.logs.some((l) => /already off or standby/.test(l)));
+  assert.deepEqual(ctx.fake.commands(), []);
 });
 
+test('I1 (S1) Standby while the Envy starts after Wake-on-LAN: sent once it answers', async (t) => {
+  const ctx = await setup(t);
+  const device = await createDevice(ctx);
+  const { gladys, fake } = ctx;
+  await fake.powerOff();
+  assert.equal((await press(gladys, device, 'power_on')).success, true);
+  const standby = await press(gladys, device, 'standby');
+  assert.equal(standby.success, false);
+  assert.match(
+    standby.error,
+    /does not answer yet .*Standby will be sent once it answers, nothing sent yet/,
+  );
+  const count = wakes(gladys).length;
+  await fake.powerOn();
+  await waitFor(() => fake.commands().includes('Standby'), 'the reaffirmed Standby');
+  await settle(200);
+  assert.deepEqual(fake.commands(), ['Standby'], 'sent once');
+  assert.equal(wakes(gladys).length, count, 'no Wake-on-LAN after the standby');
+});
+
+test('I1 a new Power on drops the standby waiting for the Envy', async (t) => {
+  const ctx = await setup(t);
+  const device = await createDevice(ctx);
+  const { gladys, fake } = ctx;
+  await fake.powerOff();
+  await press(gladys, device, 'power_on');
+  await press(gladys, device, 'standby');
+  assert.equal((await press(gladys, device, 'power_on')).success, true);
+  await fake.powerOn();
+  await waitFor(() => gladys.fake.lastState(id('power')) === 1, 'on');
+  await settle(150);
+  assert.deepEqual(fake.commands(), []);
+});
 test('Standby cancels the Wake-on-LAN chain and a Power on waiting in the queue', async (t) => {
   let hold;
   let held = false;
@@ -252,19 +292,26 @@ test('Standby cancels the Wake-on-LAN chain and a Power on waiting in the queue'
     }
     return openSession(options);
   };
-  const ctx = await setup(t, { open });
+  const ctx = await setup(t, { open, timings: { wakeWait: 100 } });
   const device = await createDevice(ctx);
   const { gladys, fake } = ctx;
   await fake.powerOff();
-  // The chain: stopped by standby.
+  // The chain: stopped by standby (refused: it may be starting).
   assert.equal((await press(gladys, device, 'power_on')).success, true);
   const ack = await press(gladys, device, 'standby');
-  assert.equal(ack.success, true, ack.error);
+  assert.match(ack.error, /will be sent once it answers/);
   const count = wakes(gladys).length;
   await settle(150);
   assert.equal(wakes(gladys).length, count, 'no Wake-on-LAN after standby');
 
   // A Power on whose connection is slow, then a standby: the Power on is dropped.
+  // The chains are over (the 100 ms wake window passed), no read under way.
+  await waitFor(
+    () => ctx.app.wakes.size === 0 && ctx.app.reaffirms.size === 0 && ctx.app.readQueued.size === 0,
+    'the chains over',
+  );
+  await settle(100);
+  ctx.advance(10_000); // the last read is no longer fresh: Power on reads first
   hold = Promise.withResolvers();
   const on = press(gladys, device, 'power_on');
   await waitFor(() => held, 'the Power on under way');
@@ -425,4 +472,135 @@ test('after a restart, Standby works before the first read (the Envy is in /data
   const ack = await press(ctx.gladys, device, 'standby');
   assert.equal(ack.success, true, ack.error);
   assert.deepEqual(fake.commands(), ['Standby']);
+});
+
+test('I2 (S2) Power on during a read of an off Envy that times out: Wake-on-LAN, at once', async (t) => {
+  let off = false;
+  const open = async (options) => {
+    if (!off) {
+      return openSession(options);
+    }
+    // An off Envy on a real network: no refusal, the connection times out.
+    const wait = Math.max(0, Math.min(options.connectTimeout, options.deadline - options.now()));
+    await settle(wait);
+    throw new EnvyError(ERROR_KINDS.UNREACHABLE, 'No answer');
+  };
+  const ctx = await setup(t, { open, timings: { connectTimeout: 500, commandBudget: 875 } });
+  const device = await createDevice(ctx);
+  off = true;
+  ctx.advance(31_000);
+  const round = ctx.app.round();
+  await settle(40);
+  const ack = await press(ctx.gladys, device, 'power_on');
+  await round;
+  assert.equal(ack.success, true, ack.error);
+  assert.equal(wakes(ctx.gladys).length, 1);
+});
+
+test('M8 Power on with the MAC only (address unknown): Wake-on-LAN', async (t) => {
+  const ctx = await setup(t);
+  const device = await createDevice(ctx);
+  ctx.app.data.devices[MAC_ID].host = '';
+  const ack = await press(ctx.gladys, device, 'power_on');
+  assert.equal(ack.success, true, ack.error);
+  assert.equal(wakes(ctx.gladys).length, 1);
+});
+
+test('M1 (S3) a configuration save keeps the Wake-on-LAN chain', async (t) => {
+  const ctx = await setup(t);
+  const device = await createDevice(ctx);
+  const { gladys, fake, app } = ctx;
+  await fake.powerOff();
+  await press(gladys, device, 'power_on');
+  await waitFor(() => wakes(gladys).length >= 2, 'the chain');
+  await app.start({ addresses: `127.0.0.1:${fake.port}`, poll_interval: 45 }, { saved: true });
+  const count = wakes(gladys).length;
+  await waitFor(() => wakes(gladys).length > count, 'the chain going on');
+});
+
+test('M3 (S7) a command queued before a Standby never leaves after it', async (t) => {
+  const ctx = await setup(t, { fakeOptions: { ack: { ToneMapOn: 150 } } });
+  const device = await createDevice(ctx);
+  const { gladys, fake } = ctx;
+  const first = press(gladys, device, 'tone_map_on');
+  await waitFor(() => fake.received.includes('ToneMapOn'), 'the first command');
+  const key = press(gladys, device, 'remote_key', 'ok');
+  await settle(5);
+  assert.equal((await press(gladys, device, 'standby')).success, true);
+  await first;
+  const result = await key;
+  assert.equal(result.success, false);
+  assert.match(result.error, /Cancelled by a standby or power off, nothing sent/);
+  assert.ok(!fake.commands().includes('KeyPress OK'));
+});
+
+test('M4 Wake-on-LAN: a 429 is tried again once; a 5xx is "maybe sent"', async (t) => {
+  const ctx = await setup(t, { timings: { wakeRetry: 100 } });
+  const device = await createDevice(ctx);
+  const { gladys, fake, app } = ctx;
+  await fake.powerOff();
+  const answers = [429, undefined];
+  let calls = 0;
+  gladys.wakeOnLan = async () => {
+    calls += 1;
+    const status = answers.shift();
+    if (status) {
+      throw Object.assign(new Error(`HTTP ${status}`), { status });
+    }
+    return { success: true };
+  };
+  assert.equal((await press(gladys, device, 'power_on')).success, true);
+  assert.equal(calls, 2);
+  app.wakes.clear();
+  ctx.advance(10_000);
+  answers.push(503);
+  const maybe = await press(gladys, device, 'power_on');
+  assert.equal(maybe.success, false);
+  assert.match(maybe.error, /Wake-on-LAN maybe sent, without confirmation from Gladys \(503\)/);
+  assert.ok(app.wakes.has(MAC_ID), 'the chain goes on');
+  app.wakes.clear();
+  answers.length = 0;
+  answers.push(400);
+  ctx.advance(10_000);
+  const refused = await press(gladys, device, 'power_on');
+  assert.match(refused.error, /Wake-on-LAN not sent \(400\), nothing sent/);
+});
+
+test('M5 one read after a burst of commands; none when nothing left', async (t) => {
+  const ctx = await setup(t, { timings: { recheckDelay: 150 } });
+  const device = await createDevice(ctx);
+  const { gladys, fake } = ctx;
+  const reads = () => fake.received.filter((l) => l === 'GetTemperatures').length;
+  const before = reads();
+  for (const key of ['up', 'down', 'left', 'right']) {
+    await press(gladys, device, 'remote_key', key);
+  }
+  await settle(400);
+  assert.equal(reads(), before + 1);
+  await fake.powerOff();
+  ctx.advance(31_000);
+  await ctx.app.round();
+  let readsAfter = 0;
+  const read = ctx.app.readDevice.bind(ctx.app);
+  ctx.app.readDevice = (...args) => {
+    readsAfter += 1;
+    return read(...args);
+  };
+  assert.equal((await press(gladys, device, 'standby')).success, true);
+  await settle(300);
+  assert.equal(readsAfter, 0, 'no read when nothing was sent');
+});
+
+test('M6 a read whose MAC does not answer publishes nothing and keeps what was known', async (t) => {
+  const ctx = await setup(t);
+  await createDevice(ctx);
+  const { gladys, fake, app } = ctx;
+  await waitFor(() => gladys.fake.lastState(id('temperature_gpu')) === 74, 'temperatures');
+  const known = app.readings.get(MAC_ID);
+  fake.ack.GetMacAddress = 'never';
+  fake.temperatures = '90 90 90 90';
+  ctx.advance(31_000);
+  await app.round();
+  assert.equal(app.readings.get(MAC_ID), known);
+  assert.equal(gladys.fake.lastState(id('temperature_gpu')), 74);
 });

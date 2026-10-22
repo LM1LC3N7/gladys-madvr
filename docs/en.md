@@ -53,24 +53,42 @@ scenes.
 
 - **Standby** and **Power off** are the protective commands: they leave at
   once, without waiting for a read or another command, in a single try. They
-  cancel a power on in progress or waiting (the repeated Wake-on-LAN
-  included). When the Envy does not answer (already off or in standby),
-  nothing is sent and the command succeeds.
+  cancel every command in progress or waiting (Power on and its repeated
+  Wake-on-LAN included): nothing queued leaves after them. When the Envy
+  does not answer:
+  - within 2 minutes of a Wake-on-LAN (it may be starting): the command is
+    refused "does not answer yet: Standby will be sent once it answers,
+    nothing sent yet", and the integration sends it once, as soon as the Envy
+    answers in those 2 minutes (a new Power on drops it);
+  - otherwise: it succeeds (nothing to send) only when the last read, made
+    within the refresh interval, already found the Envy not answering; else
+    it is refused "does not answer, nothing sent".
 - **Power on** reads the Envy first: when it answers, nothing is sent;
   otherwise Gladys sends a Wake-on-LAN packet to its MAC address, then again
-  every 10 seconds for 2 minutes, until it answers.
+  every 10 seconds for 2 minutes, until it answers. When the read that just
+  ended (5 seconds at most) found it not answering, or its address is
+  unknown, Wake-on-LAN goes at once (only the MAC is needed). When Gladys
+  answers "too many requests", the packet is asked once more 2 seconds later;
+  when Gladys does not answer or fails, the command is reported "Wake-on-LAN
+  maybe sent, without confirmation from Gladys" and the repeats go on.
 - **Profile**, **tone mapping** and **remote key** are sent only when the
   Envy answers.
 
 Before each command, the integration reads the MAC address of the Envy again:
 when another Envy answers at that IP address, nothing is sent and the address
-is forgotten. An unreadable MAC does not count as another device.
+is forgotten. A MAC address answered but unreadable (or refused with `ERROR`)
+does not count as another device: the command goes. A MAC address not
+answered in time stops a profile, tone mapping or key command ("nothing
+sent"), but never Standby nor Power off (sent in a new connection). A read
+whose MAC address is not answered publishes nothing and keeps the known
+values.
 
 Every command is answered within 4 seconds (Gladys waits 5 seconds). A
 command that left without a confirmation from the Envy in time is reported
 "sent, without confirmation"; a command the Envy refused (`ERROR`) is
 reported refused; a command that could not leave is reported "nothing sent".
-The Envy is read again 5 seconds after each command.
+The Envy is read again 5 seconds after the last of a series of commands, and
+not at all when nothing left.
 
 ## Configuration button
 
@@ -86,6 +104,9 @@ The Envy is read again 5 seconds after each command.
   sooner.
 - An Envy that does not answer shows power 0 and "Off or standby", and is
   listed in the status of the integration.
+- When another Envy answers at the address of a created one (address
+  changed), that one also shows power 0 and "Off or standby": an assumption
+  (it may be on at its new address), until you type its new address.
 - Gladys admits 300 states per minute per integration: only the values that
   change are sent, and beyond that, the latest value of each feature waits
   for the next minute.

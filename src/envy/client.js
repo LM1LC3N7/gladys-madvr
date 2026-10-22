@@ -195,6 +195,10 @@ export class Session {
       throw new EnvyError(ERROR_KINDS.BUDGET, 'No time left for this command, nothing sent');
     }
     beforeWrite?.();
+    // An OK or ERROR received before the write answers nothing of this
+    // command: dropped, never taken for its ack. Other lines are kept.
+    const waiting = this.lines.filter((l) => l !== 'OK' && !/^ERROR\b/.test(l));
+    this.lines = waiting;
     this.socket.write(line);
     try {
       for (;;) {
