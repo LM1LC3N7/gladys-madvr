@@ -59,8 +59,11 @@ Envy. Utilisez les boutons dans vos scènes.
   - dans les 2 minutes qui suivent un Wake-on-LAN (il démarre peut-être) : la
     commande est refusée « does not answer yet: Standby will be sent once it
     answers, nothing sent yet » (rien n'est encore envoyé), et l'intégration
-    l'envoie une fois, dès que l'Envy répond pendant ces 2 minutes (un nouvel
-    appui sur Allumer l'annule) ;
+    l'envoie une fois, dès que l'Envy répond, dans la minute qui suit la
+    demande (et dans les 2 minutes du Wake-on-LAN). Un nouvel appui sur Allumer
+    dans Gladys l'annule ; un allumage par la télécommande ou le bouton en
+    façade ne l'annule pas : fait dans cette minute, l'Envy peut être remis en
+    veille dès qu'il répond ;
   - sinon : elle réussit (rien à envoyer) seulement si la dernière lecture,
     faite dans l'intervalle de rafraîchissement, avait déjà trouvé l'Envy
     muet ; sinon elle est refusée « does not answer, nothing sent ».

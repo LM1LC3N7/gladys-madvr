@@ -182,3 +182,10 @@ up to date at the end of every milestone.
   - M7: docs aligned on the MAC rules above. M8: Power on with the MAC only
     (address unknown) sends Wake-on-LAN. M9: docs say that an Envy whose
     address went to another one is shown "Off or standby" by assumption.
+- (Approval of review 1, fix after 0.1.1) R1: the reaffirmed Standby /
+  Power off is bounded by `bootWait` (1 min) from the request as well as by
+  the wake window, and the end of its time is checked before an answering
+  read sends it; the docs say that a power on outside Gladys (remote, front
+  panel) does not cancel it. R4: `protectiveSend` records that a session
+  opened (`context.opened`); then the command never concludes "already off"
+  ("does not answer, nothing sent" instead).

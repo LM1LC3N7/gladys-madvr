@@ -604,3 +604,51 @@ test('M6 a read whose MAC does not answer publishes nothing and keeps what was k
   assert.equal(app.readings.get(MAC_ID), known);
   assert.equal(gladys.fake.lastState(id('temperature_gpu')), 74);
 });
+
+test('R1 the standby sent once it answers is bounded by a start-up time from the request', async (t) => {
+  const ctx = await setup(t, { timings: { wakeWait: 120_000, bootWait: 1_000 } });
+  const device = await createDevice(ctx);
+  const { gladys, fake, app } = ctx;
+  await fake.powerOff();
+  await press(gladys, device, 'power_on');
+  const standby = await press(gladys, device, 'standby');
+  assert.match(standby.error, /will be sent once it answers/);
+  // Turned on again outside Gladys, after the start-up time: never turned off.
+  ctx.advance(2_000);
+  await fake.powerOn();
+  await app.queueRead(app.data.devices[MAC_ID]);
+  await waitFor(() => gladys.fake.lastState(id('power')) === 1, 'on');
+  await settle(150);
+  assert.deepEqual(fake.commands(), []);
+  assert.equal(app.reaffirms.size, 0);
+});
+
+test('R4 a session opened during the standby: never "already off"', async (t) => {
+  let failNext = false;
+  const open = async (options) => {
+    if (failNext) {
+      failNext = false;
+      throw new EnvyError(ERROR_KINDS.UNREACHABLE, 'No answer');
+    }
+    return openSession(options);
+  };
+  const ctx = await setup(t, { open });
+  const device = await createDevice(ctx);
+  const { gladys, fake, app } = ctx;
+  await fake.powerOff();
+  ctx.advance(31_000);
+  await app.round();
+  assert.equal(app.readings.get(MAC_ID), null, 'a fresh "does not answer" read');
+  await fake.powerOn();
+  fake.ack.GetMacAddress = 'never';
+  const real = app.open.bind(app);
+  app.open = async (...args) => {
+    const session = await real(...args);
+    failNext = true; // the reconnection after the unanswered MAC fails
+    return session;
+  };
+  const ack = await press(gladys, device, 'standby');
+  assert.equal(ack.success, false);
+  assert.match(ack.error, /does not answer, nothing sent$/);
+  assert.deepEqual(fake.commands(), []);
+});

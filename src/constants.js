@@ -71,6 +71,12 @@ export const TIMINGS = Object.freeze({
   /** After Wake-on-LAN: the Envy is waited for this long, the packet sent again every `wakeStep`. */
   wakeWait: 120_000,
   wakeStep: 10_000,
+  /**
+   * A Standby / Power off asked while the Envy starts is sent once it answers,
+   * at most this long after the request (a typical start-up time), and never
+   * past `wakeWait` after the Wake-on-LAN.
+   */
+  bootWait: 60_000,
   /** Power on: time kept for the Wake-on-LAN request when the Envy is read first. */
   wakeReserve: 500,
   /** A 429 of Gladys (one wake per 2 s) is tried again once, this much later, budget allowing. */

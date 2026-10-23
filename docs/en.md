@@ -59,7 +59,10 @@ scenes.
   - within 2 minutes of a Wake-on-LAN (it may be starting): the command is
     refused "does not answer yet: Standby will be sent once it answers,
     nothing sent yet", and the integration sends it once, as soon as the Envy
-    answers in those 2 minutes (a new Power on drops it);
+    answers, within 1 minute of the request (and the 2 minutes of the
+    Wake-on-LAN). A new Power on from Gladys drops it; turning the Envy on with
+    its remote or front panel does not: if you do it within that minute, the
+    Envy may be put in standby as soon as it answers;
   - otherwise: it succeeds (nothing to send) only when the last read, made
     within the refresh interval, already found the Envy not answering; else
     it is refused "does not answer, nothing sent".

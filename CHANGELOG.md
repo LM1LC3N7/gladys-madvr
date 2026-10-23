@@ -10,6 +10,17 @@ the notes of the version's GitHub Release.
 
 ## [Unreleased]
 
+### Fixed
+
+- A Standby or Power off asked while the Envy starts after Wake-on-LAN is
+  sent once it answers only within 1 minute of the request: an Envy turned on
+  again later with its remote or front panel is no longer put in standby. The
+  docs say that turning it on outside Gladys within that minute does not
+  cancel it.
+- A Standby or Power off is no longer acked "already off" when the Envy
+  opened a connection during the command (its address answering, then
+  silent): it is reported "does not answer, nothing sent".
+
 ## [0.1.1] - 2026-10-22
 
 ### Added

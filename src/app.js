@@ -811,17 +811,19 @@ export class EnvyApp {
       this.reaffirms.delete(device.mac);
       return;
     }
+    // Past its time, never sent: an Envy answering later may have been
+    // turned on again outside Gladys.
+    if (this.now() > entry.until) {
+      this.reaffirms.delete(device.mac);
+      this.logger.warn(
+        `${deviceName(device)} did not answer in time after Wake-on-LAN: ${entry.words[0]} not sent`,
+      );
+      return;
+    }
     if (reading) {
       this.reaffirms.delete(device.mac);
       this.sendReaffirm(device, entry.words).catch((err) =>
         this.logger.warn(`${deviceName(device)}: ${entry.words[0]} not sent (${err.message})`),
-      );
-      return;
-    }
-    if (this.now() > entry.until) {
-      this.reaffirms.delete(device.mac);
-      this.logger.warn(
-        `${deviceName(device)} did not answer after Wake-on-LAN: ${entry.words[0]} not sent`,
       );
       return;
     }
@@ -1007,7 +1009,11 @@ export class EnvyApp {
       }
       const wokeAt = this.lastWake.get(device.mac);
       if (wokeAt !== undefined && this.now() - wokeAt < this.timings.wakeWait) {
-        const entry = { words, until: wokeAt + this.timings.wakeWait, timer: false };
+        // Bounded by the time of the request plus a start-up time too: an
+        // Envy turned on again later (remote, front panel) is never turned
+        // off by a standby asked long before.
+        const until = Math.min(wokeAt + this.timings.wakeWait, started + this.timings.bootWait);
+        const entry = { words, until, timer: false };
         this.reaffirms.set(device.mac, entry);
         this.followReaffirm(device, undefined);
         throw new EnvyError(
@@ -1015,7 +1021,11 @@ export class EnvyApp {
           `${name} does not answer yet (starting after a power on?): ${words[0]} will be sent once it answers, ${NOTHING_SENT} yet`,
         );
       }
-      if (this.freshlyOff(device, this.config.pollInterval * 1000 + this.timings.pollBudget)) {
+      // A session opened during this command: it answered, so never "already off".
+      if (
+        !context.opened &&
+        this.freshlyOff(device, this.config.pollInterval * 1000 + this.timings.pollBudget)
+      ) {
         this.logger.info(
           `${name} does not answer (already off or standby): ${words[0]} not needed`,
         );
@@ -1046,6 +1056,7 @@ export class EnvyApp {
     const address = this.addressOf(device);
     const deadline = started + this.timings.commandBudget;
     let session = await this.open(address, deadline);
+    context.opened = true;
     try {
       const until = Math.min(deadline, this.now() + this.timings.preRead);
       const identity = await this.checkIdentity(session, device, until);
